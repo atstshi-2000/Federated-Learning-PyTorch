@@ -17,3 +17,4 @@ Pipfile.lock
 # その他
 *.npy
 *.json
+data/cifar/cifar-10-python.tar.gz
