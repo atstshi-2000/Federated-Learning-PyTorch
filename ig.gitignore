@@ -1,0 +1,19 @@
+# Python関連
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+*.venv
+
+# データセット
+data/
+logs/
+save/
+
+# 環境ファイル
+Pipfile.lock
+
+# その他
+*.npy
+*.json

@@ -35,7 +35,13 @@ def mnist_noniid(dataset, num_users):
     idx_shard = [i for i in range(num_shards)]
     dict_users = {i: np.array([]) for i in range(num_users)}
     idxs = np.arange(num_shards*num_imgs)
-    labels = dataset.train_labels.numpy()
+    # dir(dataset)
+    # import sys
+    # sys.exit(0)
+    # labels = dataset.train_labels.numpy()
+    labels = dataset.targets.numpy()
+    # labels = dataset.train_list.numpy()
+
 
     # sort labels
     idxs_labels = np.vstack((idxs, labels))
@@ -66,7 +72,9 @@ def mnist_noniid_unequal(dataset, num_users):
     idx_shard = [i for i in range(num_shards)]
     dict_users = {i: np.array([]) for i in range(num_users)}
     idxs = np.arange(num_shards*num_imgs)
-    labels = dataset.train_labels.numpy()
+    # labels = dataset.train_labels.numpy()
+    labels = dataset.targets.numpy()
+    # labels = dataset.targets.numpy()
 
     # sort labels
     idxs_labels = np.vstack((idxs, labels))
@@ -155,6 +163,9 @@ def cifar_iid(dataset, num_users):
         dict_users[i] = set(np.random.choice(all_idxs, num_items,
                                              replace=False))
         all_idxs = list(set(all_idxs) - dict_users[i])
+
+    # print("dict users = ", len(dict_users[0]))
+    # exit(0)
     return dict_users
 
 
@@ -169,8 +180,10 @@ def cifar_noniid(dataset, num_users):
     idx_shard = [i for i in range(num_shards)]
     dict_users = {i: np.array([]) for i in range(num_users)}
     idxs = np.arange(num_shards*num_imgs)
-    # labels = dataset.train_labels.numpy()
-    labels = np.array(dataset.train_labels)
+    #labels = dataset.train_labels.numpy()
+    # labels = np.array(dataset.train_labels)
+    labels = np.array(dataset.targets)
+    # labels = np.array(dataset.train_list)
 
     # sort labels
     idxs_labels = np.vstack((idxs, labels))
@@ -179,11 +192,16 @@ def cifar_noniid(dataset, num_users):
 
     # divide and assign
     for i in range(num_users):
-        rand_set = set(np.random.choice(idx_shard, 2, replace=False))
+        rand_set = set(np.random.choice(idx_shard,int(num_shards/num_users), replace=False))
         idx_shard = list(set(idx_shard) - rand_set)
+        # print("set(idx_shard) ", len(set(idx_shard)))
+        print("idx_shard = ", len(idx_shard))
         for rand in rand_set:
             dict_users[i] = np.concatenate(
                 (dict_users[i], idxs[rand*num_imgs:(rand+1)*num_imgs]), axis=0)
+    
+    # print("dict users = ", len(dict_users[0]))
+    # exit(0)
     return dict_users
 
 

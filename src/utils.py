@@ -15,17 +15,29 @@ def get_dataset(args):
     each of those users.
     """
 
+    # print(datasets.CIFAR10.train_list)
+    # import sys
+    # sys.exit(0)
     if args.dataset == 'cifar':
         data_dir = '../data/cifar/'
-        apply_transform = transforms.Compose(
-            [transforms.ToTensor(),
-             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        apply_transform1 = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        
+        apply_transform2 = transforms.Compose([
+            transforms.Pad(padding = 4,fill = 0),
+            transforms.RandomCrop(size = (32,32)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,0.5,0.5),(0.5,0.5,0.5))])
 
         train_dataset = datasets.CIFAR10(data_dir, train=True, download=True,
-                                       transform=apply_transform)
+                                       transform=apply_transform2)
 
         test_dataset = datasets.CIFAR10(data_dir, train=False, download=True,
-                                      transform=apply_transform)
+                                      transform=apply_transform1)
+        
+        print("train dataset = ",len(train_dataset))
 
         # sample training data amongst users
         if args.iid:
