@@ -22,31 +22,16 @@ from models import MLP, CNNMnist, CNNFashion_Mnist, CNNCifar
 from utils import get_dataset, average_weights, exp_details
 
 from sklearn.preprocessing import StandardScaler
-from ccs_utils import coverage_centric_selection
 import psutil
 import json
 from torch.utils.data import DataLoader
+from collections import defaultdict
+import slackweb
 
-
-def normalize_el2n_scores(el2n_scores):
-    """
-    Normalize el2n scores across the entire 2D array (global normalization).
-
-    Args:
-    - el2n_scores: A 2D numpy array where each row corresponds to a client and columns are scores.
-
-    Returns:
-    - normalized_scores: A 2D numpy array with globally normalized scores.
-    """
-    min_score = np.min(el2n_scores)
-    max_score = np.max(el2n_scores)
-    normalized_scores = (el2n_scores - min_score) / (max_score - min_score + 1e-8)  # Avoid division by zero
-
-    return normalized_scores
-
-
-
-
+# slack送信メソッド
+def slackPost(message):
+    slack = slackweb.Slack(url = SLACKURL)
+    slack.notify(text = message)
 
 def extract_features(model, dataset, device):
     """
@@ -71,7 +56,6 @@ def extract_features(model, dataset, device):
             features.append(outputs.cpu().numpy())
 
     return np.vstack(features)
-
 def log_metrics(round_num, train_time, model, accuracies, log_path="logs"):
     """
     Log training metrics for each round.
@@ -102,9 +86,13 @@ def log_metrics(round_num, train_time, model, accuracies, log_path="logs"):
         "accuracy_mean": accuracy_mean,
         "accuracy_std": accuracy_std
     }
+    # JSON 保存
     os.makedirs(log_path, exist_ok=True)
     with open(os.path.join(log_path, f"round_{round_num}.json"), "w") as f:
         json.dump(log_data, f, indent=4)
+
+    # 返り値を追加
+    return memory_usage, model_size
 
 ###注意！！実行時には169行目以降のコメントアウトと340行目以降のコメント 関数プルーニングの時は116行目以降も！加えてユーザー選択もコメントアウトしているためそこの確認も忘れずに！
     
@@ -184,12 +172,17 @@ if __name__ == '__main__':
     print_every = 1
     val_loss_pre, counter = 0, 0
     global_round = 0
+    el2n_time = 0.0
     ta,tt,te_all,fin = 0,0,0,0
     local_models = [LocalUpdate(args=args, dataset=train_dataset, idxs=user_groups[idx], logger=logger, client_id=idx) for idx in range(args.num_users)]
-    
+    report_lines = []
     # クライアントオブジェクトのリストを作成
     clients = [LocalUpdate(args=args, dataset=train_dataset, idxs=user_groups[idx], logger=logger, client_id=idx) for idx in range(args.num_users)]
-    
+    el2n_times = {cid: 0.0 for cid in range(args.num_users)}
+    train_times = {cid: 0.0 for cid in range(args.num_users)}
+        # ループ前に空のリストを用意
+    mem_history  = []   # 各ラウンドの memory_MB を格納
+    size_history = []   # 各ラウンドの comm_KB    を格納
     # if args.dataset == 'cifar':
     org_num = 40000 / args.num_users
     if args.dataset == 'mnist' or args.dataset == 'fmnist':
@@ -214,19 +207,16 @@ if __name__ == '__main__':
     # print("localmodels  = ", len(local_models[0].trainloader))
     el2n = args.el2n
     percent = args.percent
-    if args.el2n == 5:
-        el2n_scores = np.zeros((args.num_users, len(train_dataset)))
-
-
+    start_time = time.time()
     for epoch in tqdm(range(args.epochs)):
-        start_time = time.time()
+        
         local_weights, local_losses = [], []
         print(f'\n | Global Training Round : {epoch+1} |\n')
 
         global_model.train()
         m = max(int(args.frac * args.num_users), 1)
         if len(choice_users) <= 4 :
-            print("no crient")
+            print("no client")
             break
         idxs_users = np.random.choice(choice_users, m, replace=False)        
         # if global_round == 10 and args.el2n == 1:
@@ -250,13 +240,13 @@ if __name__ == '__main__':
         # print("pru_two = ",pru_two)
         # print("pru_three =",pru_three)
         for idx in idxs_users:
-            t0 = time.monotonic()
 
             # if args.el2n != 0 and global_round == 1:
             # if args.el2n != 0 and global_round <= 1:
 
 #一度のみPruningを行う場合186行目までのコメントアウトを削除！
             if args.el2n == 1 and global_round == 10 : 
+                el2n_start_time = time.monotonic()
                 el2n_threshold = args.threshold # これを適切な値に調整してください.毎回間引くときは0.05くらい 一回のときは0.5くらい
                 # Calculate and print el2n scores
                 local_model = local_models[idx]
@@ -270,33 +260,38 @@ if __name__ == '__main__':
                     choice_users.remove(idx)
                     continue
                 print("keep_idxs = ",keep_idxs)
-                local_model.update_dataset(keep_idxs)
+                local_model.update_dataset(keep_idxs, el2n=args.el2n)
                 pru_num = org_num -len(keep_idxs)# すでに間引かれたデータセットの総数
                 # print(f"User {idx}, keep: {keep_idxs[:10]}")
                 print(f'Remaining dataset size after el2n thresholding: {len(keep_idxs)}')
                 print("Pruned dataset size after el2n thresholding",pru_num)
                 prun_num.append(pru_num)
                 pri_pru[idx] = pru_num
+                el2n_time = (el2n_end_time - el2n_start_time)
+                el2n_times[idx] += el2n_time
 
-            
-# #各回Pruningを行う場合199行目までのコメントアウトを削除！
+            # #各回Pruningを行う場合199行目までのコメントアウトを削除！
             if args.el2n == 2 and global_round >= 10 : # 提案手法１ 各回pruning
+                el2n_start_time = time.monotonic()
                 el2n_threshold = args.threshold # これを適切な値に調整してください.毎回間引くときは0.05くらい 一回のときは0.5くらい
                 local_model = local_models[idx]
                 keep_idxs = local_model.compute_el2n_scores(global_model, el2n_threshold)
                 if len(keep_idxs) <= args.local_bs:
                     choice_users.remove(idx)
-                    continue            #     local_model.update_dataset(keep_idxs)
+                    continue            #     local_model.update_dataset(keep_idxs, el2n=args.el2n)
                 pru_num = org_num - len(keep_idxs)# すでに間引かれたデータセットの総数
                 # print(f"User {idx}, keep: {keep_idxs[:10]}")
                 print(f'Remaining dataset size after el2n thresholding: {len(keep_idxs)}')
                 print("Pruning dataset size after el2n thresholding",pru_num)
                 prun_num.append(pru_num)
                 pri_pru[idx] = pru_num
+                el2n_time = (el2n_end_time - el2n_start_time)
+                el2n_times[idx] += el2n_time
 
             
 #既存手法を行う場合213行目までのコメントアウトを削除！
             if args.el2n == 3 and global_round == 10 : # 既存手法
+                el2n_start_time = time.monotonic()
                 el2n_threshold = args.threshold
                 local_model = local_models[idx]
                 keep_idxs = local_model.compute_el2n_scores_1(global_model, percent)
@@ -304,13 +299,15 @@ if __name__ == '__main__':
                 if len(keep_idxs) <= args.local_bs:
                     choice_users.remove(idx)
                     continue
-                local_model.update_dataset(keep_idxs)
+                local_model.update_dataset(keep_idxs, el2n=args.el2n)
                 pru_num = org_num -len(keep_idxs)# すでに間引かれたデータセットの総数
                 # print(f"User {idx}, keep: {keep_idxs[:10]}")
                 print(f'Remaining dataset size after el2n thresholding: {len(keep_idxs)}')
                 print("Pruning dataset size after el2n thresholding",pru_num)
                 prun_num.append(pru_num)
                 pri_pru[idx] = pru_num
+                el2n_time = (el2n_end_time - el2n_start_time)
+                el2n_times[idx] += el2n_time
 
             
             # if args.el2n == 4 and global_round > 3 and train_accuracy[-1] > args.acc_thre1: # accuracyに応じてプルーニング,プルーニングしたいとき以外は入れたくない。
@@ -332,7 +329,7 @@ if __name__ == '__main__':
             #         pru_three = pru_three + 1
             #     print("keep_idxs = ",keep_idxs)
             #     print("len(keep_idxs) = ",len(keep_idxs))
-            #     local_model.update_dataset(keep_idxs)
+            #     local_model.update_dataset(keep_idxs, el2n=args.el2n)
             #     pru_num = org_num - len(keep_idxs)# すでに間引かれたデータセットの総数
             #     # print(f"User {idx}, keep: {keep_idxs[:10]}")
             #     print(f'Remaining dataset size after el2n thresholding: {len(keep_idxs)}')
@@ -345,6 +342,7 @@ if __name__ == '__main__':
 
 #多種の関数で間引く数を決める提案手法行うなら275行目までのコメントアウトを削除！
             if args.el2n == 4 and global_round > 3:
+                el2n_start_time = time.monotonic()
                 pru_func = a1 * stock_accuracy[idx] + b1 #　間引きたい数を表す(線形)
                 # pru_func = a2 * (stock_accuracy[idx]) ** 2 + b2 #間引きたい数を表す（二次関数）
             #     # pru_func = 56 * train_accuracy[-1] - 33.6 #　間引きたい数を表す(線形)
@@ -367,7 +365,7 @@ if __name__ == '__main__':
                 if len(keep_idxs) <= args.local_bs:
                     choice_users.remove(idx)
                     continue
-                local_model.update_dataset(keep_idxs)                
+                local_model.update_dataset(keep_idxs, el2n=args.el2n)                
                 pru_num = org_num - len(keep_idxs)# すでに間引かれたデータセットの総数
                 # print(f"User {idx}, keep: {keep_idxs[:10]}")
                 print(f'Remaining dataset size after el2n thresholding: {len(keep_idxs)}')
@@ -376,58 +374,43 @@ if __name__ == '__main__':
                 pri_pru[idx] = pru_num
                 pru_func_stock[idx] = pru_func
                 # print("pru_func_stock = ",pru_func_stock[idx])
-
-            if args.el2n == 5:
-                score_dir = "logs/scores"  # 正しいパスを指定
-                # スコア保存ディレクトリを作成
-                os.makedirs(score_dir, exist_ok=True)  # ディレクトリが存在しない場合は作成
-                
-
-                local_model = local_models[idx]  # そもそもこのループは各クライアント毎に回っている。
-                el2n_scores[idx] = local_model.compute_el2n_scores_4(global_model)     
-
-
-            t1 = time.monotonic()
+                el2n_end_time = time.monotonic()
+                el2n_time = (el2n_end_time - el2n_start_time)
+                el2n_times[idx] += el2n_time
         #el2nの数値によって決める
             if len(keep_idxs) <= args.local_bs and args.el2n == 1 and global_round == 10: #一回プルーニング
                 print("len(keep_idxs) <= local_bs")
                 t2 = time.monotonic()
-                te = t1 - t0
-                tt = t2 - t1
-                print(f"EL2N: {te:.3f}s, Train: {tt:.3f}s")
-                ta = tt + ta + te
-                te_all = te + te_all
+                e = el2n_end_time - el2n_start_time
+                print(f"EL2N: {e:.3f}s, Train: {train_time:.3f}s")
                 fin = 1
                 break
 
             if len(keep_idxs) <= args.local_bs and args.el2n == 3 and global_round == 10: #既存手法
                 print("len(keep_idxs) <= local_bs")
                 t2 = time.monotonic()
-                te = t1 - t0
-                tt = t2 - t1
-                print(f"EL2N: {te:.3f}s, Train: {tt:.3f}s")
-                ta = tt + ta + te
-                te_all = te + te_all
+                e = el2n_end_time - el2n_start_time
+                print(f"EL2N: {e:.3f}s, Train: {train_time:.3f}s")
                 fin = 1
                 break
 
             if len(keep_idxs) <= args.local_bs and args.el2n == 2 and global_round >= 10: #10epochs以降各回プルーニング
                 print("len(keep_idxs) <= local_bs")
                 t2 = time.monotonic()
-                te = t1 - t0
-                tt = t2 - t1
-                print(f"EL2N: {te:.3f}s, Train: {tt:.3f}s")
-                ta = tt + ta + te
-                te_all = te + te_all
+                e = el2n_end_time - el2n_start_time
+                print(f"EL2N: {e:.3f}s, Train: {train_time:.3f}s")
                 fin = 1
                 break
 
             local_model = local_models[idx]
+            t_train_start = time.monotonic()
             w, loss = local_model.update_weights(
                 model=copy.deepcopy(global_model), global_round=epoch)
             local_weights.append(copy.deepcopy(w))
             local_losses.append(copy.deepcopy(loss))
-
+            t_train_end = time.monotonic()
+            train_time = (t_train_end - t_train_start)
+            train_times[idx] += train_time
 
 
             # if len(keep_idxs) <= args.local_bs and args.el2n == 4 and global_round >= 10 and pru_one != 0 and pru_two != 0 and pru_three != 0: # accuracyに応じてプルーニング
@@ -452,65 +435,10 @@ if __name__ == '__main__':
             #     fin = 1
             #     break
 
-            t2 = time.monotonic()
-            te = t1 - t0
-            tt = t2 - t1
-            print(f"EL2N: {te:.3f}s, Train: {tt:.3f}s")
-            ta = tt + ta + te
-            te_all = te + te_all
+            print(f"EL2N: {el2n_time:.3f}s, Train: {train_time:.3f}s")
+            # ta = train_time + el2n_time
+            te_all = el2n_time + te_all
 
-        if args.el2n == 5:
-            # el2n_scores: shape (num_users, num_samples_per_user)
-            num_users, num_samples = el2n_scores.shape
-
-            # 正規化（全体で正規化）
-            min_score = np.min(el2n_scores)
-            max_score = np.max(el2n_scores)
-            normalized_scores = (el2n_scores - min_score) / (max_score - min_score + 1e-8)
-
-            # フラット化
-            flattened_scores = normalized_scores.flatten()
-
-            # インデックスから (client_id, local_index) を得るマッピング
-            global_to_local_map = [(client_id, local_idx)
-                                for client_id in range(num_users)
-                                for local_idx in range(num_samples)]
-
-            # CCSのパラメータ（必要に応じて変更）
-            total_data_points = num_users * num_samples
-            num_to_keep = int(total_data_points * 0.5)  # 例: 半分残す
-            num_groups = 100  # 例: 100グループに分割
-
-            # coverage centric selection を実行
-            keep_global_indices = coverage_centric_selection(flattened_scores,
-                                                            num_to_keep=num_to_keep,
-                                                            num_groups=num_groups)
-
-            # クライアントごとのローカルインデックスに変換
-            from collections import defaultdict
-            client_local_keep_indices = defaultdict(list)
-
-            for global_idx in keep_global_indices:
-                client_id, local_idx = global_to_local_map[global_idx]
-                client_local_keep_indices[client_id].append(local_idx)
-
-
-            # クライアントに通知してデータセットを更新
-            for idx in idxs_users:
-                local_model = local_models[idx]
-
-                # 対応するインデックスが存在すれば使う、なければ全データを使用
-                if idx in client_local_keep_indices:
-                    keep_indices = client_local_keep_indices[idx]
-                else:
-                    keep_indices = list(range(len(local_model.train_dataset)))  # または空リストなどの処理
-
-                # データセットの再構成
-                local_model.update_dataset(keep_indices, el2n=args.el2n)
-
-                # 正規化されたスコアを保存（オプション）
-            np.save(os.path.join(score_dir, f"normalized_scores_epoch_{epoch}.npy"), normalized_scores)
-                
         if fin == 0:
             # update global weights
             global_weights = average_weights(local_weights)
@@ -549,29 +477,33 @@ if __name__ == '__main__':
             # import sys
             # sys.exit(0)
             # 各ラウンド終了後に評価指標を記録
-            log_metrics(
+            mem_mb, model_kb = log_metrics(
                 round_num=epoch + 1,
                 train_time=time.time() - start_time,
                 model=global_model,
                 accuracies=list_acc,
-                log_path="logs"
-            )
-        
+                log_path="logs")
+            # ラウンドごとにリストへ追加
+            mem_history.append(mem_mb)
+            size_history.append(model_kb)
         else :
             break
 
     # Test inference after completion of training
     test_acc, test_loss = test_inference(args, global_model, test_dataset)
-    
+    end_time = time.time()
+    all_time = end_time - start_time
     # calculate pruning data
     # total_pru = len(self.trainloader.dataset)
-
+    total_el2n =sum(el2n_times.values())
+    total_train = sum(train_times.values())
     print(f' \n Results after {global_round} global rounds of training:')
     print("|---- Avg Train Accuracy: {:.2f}%".format(100*train_accuracy[-1]))
     print("|---- Test Accuracy: {:.2f}%".format(100*test_acc))
     # print("train time =",ta)
-    print(f"Train time = : {ta:.3f}s")
-    print(f"el2n time = : {te_all:.3f}s")
+    print(f"Train time = : {total_train:.3f}s")
+    print(f"el2n time = : {total_el2n:.3f}s")
+    print(f"Total time = : {all_time:.3f}s")
     if args.el2n !=0 and global_round >=10:
         for idx in range(args.num_users):
             print("Pruning dataset:",pri_pru[idx])
@@ -589,37 +521,51 @@ if __name__ == '__main__':
     else :    
         with open(file_name, 'wb') as f:
             pickle.dump([train_loss, train_accuracy, test_acc, keep_idxs, prun_num, args.threshold], f)
-    
 
-# if __name__ == '__main__':
-    slackPost(f'python src/federated_main.py --dataset {args.dataset} --el2n {args.el2n} --epoch {args.epochs} --threshold {args.threshold} --pru_percent {args.pru_percent} --percent {args.percent} --start_accuracy {args.start_accuracy} \n training on fugu \n Results after {global_round} global rounds of training: \n |---- Avg Train Accuracy: {100*train_accuracy[-1]:.2f} \n Training Loss : {np.mean(np.array(train_loss))} \n |---- Test Accuracy:{100*test_acc:.2f} \n Train time = : {ta:.3f}s \n el2n time = : {te_all:.3f}s')
-    # , args.model, args.dataset, args.lr, args.seed, args.el2n, args.num_users, args.local_ep, args.local_bs, args.epochs, args.threshold)
-    # slackPost(f'Results after {args.epochs} global rounds of training:')
-    # slackPost(f' \n Results after {global_round} global rounds of training:')
-    # slackPost("|---- Avg Train Accuracy: {:.2f}%".format(100*train_accuracy[-1]))
-    # slackPost(f'Training Loss : {np.mean(np.array(train_loss))}')
-    # slackPost("|---- Test Accuracy: {:.2f}%".format(100*test_acc))
-    # # print("train time =",ta)
-    # slackPost(f"Train time = : {ta:.3f}s")
-    # slackPost(f"el2n time = : {te_all:.3f}s")
-    if args.el2n == 1:
-        slackPost(f'一回pruning \n pruning dataset {pri_pru[0]}\n {pri_pru[1]}\n {pri_pru[2]}\n {pri_pru[3]}\n {pri_pru[4]}\n {pri_pru[5]}\n {pri_pru[6]}\n {pri_pru[7]}\n {pri_pru[8]}\n {pri_pru[9]} \n pruning dataset = : {total_pru} ')
-    elif args.el2n == 2 :
-        slackPost(f'各回pruning \n pruning dataset {pri_pru[0]}\n {pri_pru[1]}\n {pri_pru[2]}\n {pri_pru[3]}\n {pri_pru[4]}\n {pri_pru[5]}\n {pri_pru[6]}\n {pri_pru[7]}\n {pri_pru[8]}\n {pri_pru[9]} \n pruning dataset = : {total_pru} ')
-    elif args.el2n == 3 :
-        slackPost(f'既存手法 \n pruning dataset {pri_pru[0]}\n {pri_pru[1]}\n {pri_pru[2]}\n {pri_pru[3]}\n {pri_pru[4]}\n {pri_pru[5]}\n {pri_pru[6]}\n {pri_pru[7]}\n {pri_pru[8]}\n {pri_pru[9]} \n pruning dataset = : {total_pru} ')
-    elif args.el2n == 4 :
-        slackPost(f'関数pruning \n pruning dataset {pri_pru[0]}\n {pri_pru[1]}\n {pri_pru[2]}\n {pri_pru[3]}\n {pri_pru[4]}\n {pri_pru[5]}\n {pri_pru[6]}\n {pri_pru[7]}\n {pri_pru[8]}\n {pri_pru[9]} \n pruning dataset = : {total_pru} ')
-    # if args.el2n != 0:
-    #     slackPost(f'pruning dataset {pri_pru[0]}\n {pri_pru[1]}\n {pri_pru[2]}\n {pri_pru[3]}\n {pri_pru[4]}\n {pri_pru[5]}\n {pri_pru[6]}\n {pri_pru[7]}\n {pri_pru[8]}\n {pri_pru[9]} \n pruning dataset = : {total_pru} ')
-        # slackPost(f'pruning dataset = : {total_pru} ')
-   # slackPost("prun_num=",len(keep_idxs))
-   # slackPost('test!!!')
+        # 実行コマンド
+    report_lines.append(f"```")
+    report_lines.append(f"python src/federated_main.py "
+                        f"--dataset {args.dataset} "
+                        f"--el2n {args.el2n} "
+                        f"--epoch {args.epochs} "
+                        f"--threshold {args.threshold} "
+                        f"--pru_percent {args.pru_percent} "
+                        f"--percent {args.percent} "
+                        f"--start_accuracy {args.start_accuracy}")
+    report_lines.append(f"```")
 
+    # 実行環境と基本結果
+    report_lines += [
+        "",
+        f"training on fugu",
+        f"Results after {global_round} global rounds of training:",
+        f"|---- Avg Train Accuracy      : {100 * train_accuracy[-1]:.2f}%",
+        f"|---- Training Loss           : {np.mean(np.array(train_loss)):.4f}",
+        f"|---- Test Accuracy           : {100 * test_acc:.2f}%",
+        f"|---- Train time              : {total_train:.3f}s",
+        f"|---- el2n time               : {total_el2n:.3f}s",
+        f"|---- Total time              : {all_time:.3f}s",
+        f"|---- Pruning dataset         : {pri_pru}",
+        f"|---- Total Pruning dataset   : {total_pru}",
+        f"|---- num_client_dataset      : {args.num_per_client}",
+    ]
+    # モデルメモリ関連情報
+    avg_mem = sum(mem_history) / len(mem_history)
+    final_mem = mem_history[-1]
+    avg_size = sum(size_history) / len(size_history)
+    final_size = size_history[-1]
 
+    report_lines += [
+        "",
+        f"|---- 平均メモリ使用量         : {avg_mem:.1f} MB",
+        f"|---- 最終ラウンドメモリ使用量 : {final_mem:.1f} MB",
+        f"|---- 平均モデルサイズ         : {avg_size:.1f} KB",
+        f"|---- 最終ラウンドモデルサイズ : {final_size:.1f} KB",
+    ]
 
-
-
+    # レポート送信
+    report = "\n".join(report_lines)
+    slackPost(report)
 
     # PLOTTING (optional)
     import matplotlib

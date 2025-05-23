@@ -14,14 +14,53 @@ def mnist_iid(dataset, num_users):
     :param num_users:
     :return: dict of image index
     """
-    num_items = int(len(dataset)/num_users)
-    dict_users, all_idxs = {}, [i for i in range(len(dataset))]
-    for i in range(num_users):
-        dict_users[i] = set(np.random.choice(all_idxs, num_items,
-                                             replace=False))
-        all_idxs = list(set(all_idxs) - dict_users[i])
-    return dict_users
+    # num_items = int(len(dataset)/num_users)
+    # dict_users, all_idxs = {}, [i for i in range(len(dataset))]
+    # for i in range(num_users):
+    #     dict_users[i] = set(np.random.choice(all_idxs, num_items,
+    #                                          replace=False))
+    #     all_idxs = list(set(all_idxs) - dict_users[i])
+    # return dict_users
+    all_idxs = list(range(len(dataset)))
+    user_groups = {i: all_idxs.copy() for i in range(num_users)}
+    return user_groups
+# def mnist_iid(dataset, num_users, num_per_client=None, replace=False, seed=42):
+#     """
+#     Sample I.I.D. client data from MNIST dataset with configurable samples per client.
 
+#     Args:
+#       dataset         : torch Dataset (with __len__ defined)
+#       num_users       : number of clients
+#       num_per_client  : samples to assign to each client; if None, defaults to len(dataset)//num_users
+#       replace         : whether to sample with replacement when num_per_client * num_users > len(dataset)
+#       seed            : random seed for reproducibility
+
+#     Returns:
+#       dict_users: dict mapping client_id -> list of sample indices
+#     """
+#     n = len(dataset)
+#     rng = np.random.default_rng(seed)
+
+#     # デフォルトは均等分割
+#     if num_per_client is None:
+#         num_per_client = n // num_users
+
+#     # 重複なしで割り当てたい量が総数を超える場合はエラーか置き換え動作
+#     if not replace and num_per_client * num_users > n:
+#         raise ValueError(
+#             f"Cannot assign {num_per_client} samples to {num_users} clients "
+#             f"without replacement (total {num_per_client*num_users} > {n})."
+#         )
+
+#     all_indices = np.arange(n)
+#     dict_users = {}
+
+#     for uid in range(num_users):
+#         # サンプリング
+#         chosen = rng.choice(all_indices, size=num_per_client, replace=replace)
+#         dict_users[uid] = chosen.tolist()
+
+#     return dict_users
 
 def mnist_noniid(dataset, num_users):
     """
@@ -150,26 +189,65 @@ def mnist_noniid_unequal(dataset, num_users):
     return dict_users
 
 
-def cifar_iid(dataset, num_users):
+# def cifar_iid(dataset, num_users):
+#     """
+#     Sample I.I.D. client data from CIFAR10 dataset
+#     :param dataset:
+#     :param num_users:
+#     :return: dict of image index
+#     :トレーニングデータの数を管理している。
+#     """
+#     # num_items = int(len(dataset)/num_users)
+#     # dict_users, all_idxs = {}, [i for i in range(len(dataset))]
+#     # for i in range(num_users):
+#     #     dict_users[i] = set(np.random.choice(all_idxs, num_items,
+#     #                                          replace=False))
+#     #     all_idxs = list(set(all_idxs) - dict_users[i])
+#     all_idxs = list(range(len(dataset)))
+#     dict_users = {i: all_idxs.copy() for i in range(num_users)}
+#     return dict_users
+#     # print("dict users = ", len(dict_users[0]))
+#     # exit(0)
+#     # return dict_users
+def cifar_iid(dataset, num_users, num_per_client=None, replace=True, seed=None):
     """
-    Sample I.I.D. client data from CIFAR10 dataset
-    :param dataset:
-    :param num_users:
-    :return: dict of image index
-    """
-    num_items = int(len(dataset)/num_users)
-    dict_users, all_idxs = {}, [i for i in range(len(dataset))]
-    for i in range(num_users):
-        dict_users[i] = set(np.random.choice(all_idxs, num_items,
-                                             replace=False))
-        all_idxs = list(set(all_idxs) - dict_users[i])
+    Sample I.I.D. client data from CIFAR10 dataset with configurable samples per client.
 
-    # print("dict users = ", len(dict_users[0]))
-    # exit(0)
+    Args:
+      dataset         : torch Dataset instance (must support len())
+      num_users       : number of clients
+      num_per_client  : number of samples to assign to each client;
+                        if None, defaults to len(dataset)//num_users
+      replace         : whether to sample with replacement
+      seed            : random seed for reproducibility
+
+    Returns:
+      dict_users: dict mapping client_id -> list of sample indices
+    """
+    n = len(dataset)
+    rng = np.random.default_rng(seed)
+
+    # デフォルトは均等分割
+    if num_per_client is None:
+        num_per_client = n // num_users
+
+    # # 重複なしで総数を超える場合は例外
+    # if not replace and num_per_client * num_users > n+1:
+    #     raise ValueError(
+    #         f"Cannot assign {num_per_client} unique samples to {num_users} clients "
+    #         f"(requires {num_per_client*num_users} > {n+1})."
+    #     )
+
+    all_indices = np.arange(n)
+    dict_users = {}
+
+    for uid in range(num_users):
+        chosen = rng.choice(all_indices, size=num_per_client, replace=replace)
+        dict_users[uid] = chosen.tolist()
+
     return dict_users
 
-
-def cifar_noniid(dataset, num_users):
+def cifar_noniid(dataset, num_users, num_per_client=10000, replace=False, seed=42):
     """
     Sample non-I.I.D client data from CIFAR10 dataset
     :param dataset:
@@ -190,19 +268,27 @@ def cifar_noniid(dataset, num_users):
     idxs_labels = idxs_labels[:, idxs_labels[1, :].argsort()]
     idxs = idxs_labels[0, :]
 
-    # divide and assign
-    for i in range(num_users):
-        rand_set = set(np.random.choice(idx_shard,int(num_shards/num_users), replace=False))
-        idx_shard = list(set(idx_shard) - rand_set)
-        # print("set(idx_shard) ", len(set(idx_shard)))
-        print("idx_shard = ", len(idx_shard))
-        for rand in rand_set:
-            dict_users[i] = np.concatenate(
-                (dict_users[i], idxs[rand*num_imgs:(rand+1)*num_imgs]), axis=0)
+    # # divide and assign 元ネタ
+    # for i in range(num_users):
+    #     rand_set = set(np.random.choice(idx_shard,int(num_shards/num_users), replace=False))
+    #     idx_shard = list(set(idx_shard) - rand_set)
+    #     # print("set(idx_shard) ", len(set(idx_shard)))
+    #     print("idx_shard = ", len(idx_shard))
+    #     for rand in rand_set:
+    #         dict_users[i] = np.concatenate(
+    #             (dict_users[i], idxs[rand*num_imgs:(rand+1)*num_imgs]), axis=0)
     
+    # 新：任意件数サンプリング
+    rng = np.random.default_rng(seed)
+    all_idxs = np.arange(len(dataset))
+    dict_users = {}
+    for uid in range(num_users):
+        dict_users[uid] = rng.choice(all_idxs, size=num_per_client,
+                                     replace=replace)
+    return dict_users
     # print("dict users = ", len(dict_users[0]))
     # exit(0)
-    return dict_users
+    # return dict_users
 
 
 if __name__ == '__main__':

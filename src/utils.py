@@ -41,15 +41,15 @@ def get_dataset(args):
 
         # sample training data amongst users
         if args.iid:
-            # Sample IID user data from Mnist
-            user_groups = cifar_iid(train_dataset, args.num_users)
+            # Sample IID user data from Cifar
+            user_groups = cifar_iid(train_dataset, num_users=10, num_per_client=args.num_per_client, replace=False)
         else:
             # Sample Non-IID user data from Mnist
             if args.unequal:
-                # Chose uneuqal splits for every user
+                # Chose unequal splits for every user
                 raise NotImplementedError()
             else:
-                # Chose euqal splits for every user
+                # Chose equal splits for every user
                 user_groups = cifar_noniid(train_dataset, args.num_users)
 
     elif args.dataset == 'mnist' or 'fmnist':

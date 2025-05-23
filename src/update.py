@@ -21,9 +21,26 @@ class DatasetSplit(Dataset):
     def __len__(self):
         return len(self.idxs)
 
+    # def __getitem__(self, item):
+    #     image, label = self.dataset[self.idxs[item]]
+    #     return self.idxs[item], torch.tensor(image), torch.tensor(label)
     def __getitem__(self, item):
         image, label = self.dataset[self.idxs[item]]
-        return self.idxs[item], torch.tensor(image), torch.tensor(label)
+# --- image 側の処理 ---
+        if isinstance(image, torch.Tensor):
+            img_t = image.clone().detach()
+        else:
+            # NumPy 配列や PIL Image の場合
+            img_t = torch.as_tensor(image)
+
+        # --- label 側の処理 ---
+        if isinstance(label, torch.Tensor):
+            lbl_t = label.clone().detach()
+        else:
+            # Python int/float の場合
+            lbl_t = torch.tensor(label)
+
+        return self.idxs[item], img_t, lbl_t        
 
 
 class LocalUpdate(object):
@@ -272,14 +289,14 @@ class LocalUpdate(object):
         #reduced_idxs_scalar = int(reduced_idxs[0])  # Convert the first element to a scalar
         #self.idxs = [int(idx) - reduced_idxs_scalar for idx in self.idxs]
         #assert len(np.intersect1d(self.idxs_train, keep_idxs)) == len(keep_idxs)
-        if el2n != 5:
-            self.trainloader = DataLoader(DatasetSplit(self.full_dataset, keep_idxs),
-                                          batch_size=self.args.local_bs,
-                                          shuffle=True, drop_last=True)
-        else:
+        # if el2n != 5:
+        #     self.trainloader = DataLoader(DatasetSplit(self.full_dataset, keep_idxs),
+        #                                   batch_size=self.args.local_bs,
+        #                                   shuffle=True, drop_last=True)
+        # else:
             # Update the indices in DatasetSplit instead of accessing `data` directly
-            self.trainloader.dataset.idxs = keep_idxs
-            print(f"Updated dataset size: {len(self.trainloader.dataset)}")
+        self.trainloader.dataset.idxs = keep_idxs
+        print(f"Updated dataset size: {len(self.trainloader.dataset)}")
 
     def train_val_test(self, dataset, idxs):
         """
