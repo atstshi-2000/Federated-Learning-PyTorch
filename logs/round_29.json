@@ -1,8 +1,8 @@
 {
     "round": 29,
-    "train_time_sec": 836.2061035633087,
-    "memory_MB": 1412.5390625,
+    "train_time_sec": 1118.3867230415344,
+    "memory_MB": 1393.09375,
     "comm_KB": 43756.0478515625,
-    "accuracy_mean": 0.9890000000000001,
-    "accuracy_std": 0.0030000000000000027
+    "accuracy_mean": 0.8725999999999999,
+    "accuracy_std": 0.005624944444170098
 }

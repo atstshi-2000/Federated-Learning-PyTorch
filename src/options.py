@@ -67,5 +67,7 @@ def args_parser():
     parser.add_argument('--acc_thre3', type=float, default=0.8,help='accuracy pruning third')
     parser.add_argument('--start_accuracy', type=float, default=0.6,help='pruning start accuracy')
     parser.add_argument('--pru_percent', type=float, default=0.6,help='pruning max percent')
+    parser.add_argument('--num_per_client', type=int, default=12000,help='number of samples per client ただし、20%のデータが訓練時の精度評価に使われる。')
+    parser.add_argument('--prune_rate', type=float, default=0.1,help='CCSのprune_rate')
     args = parser.parse_args()
     return args
