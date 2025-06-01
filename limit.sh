@@ -1,0 +1,26 @@
+#!/bin/bash
+# run.sh
+
+client=(10000)
+# prune_rates=(0.05)
+prune_rates=(0.05 0.1 0.15)
+
+for cid in "${client[@]}"; do
+  for rate in "${prune_rates[@]}"; do
+    echo "Testing on dataset with client ${cid} and prune_rate ${rate} ..."
+    ./src/limited_ccs.py \
+      --model cnn \
+      --dataset cifar \
+      --lr 0.03 \
+      --seed 42 \
+      --el2n 5 \
+      --num_users 10 \
+      --local_ep 3 \
+      --local_bs 32 \
+      --verbose 0 \
+      --epoch 50 \
+      --gpu cuda:0 \
+      --num_per_client "${cid}" \
+      --prune_rate "${rate}"
+  done
+done

@@ -15,9 +15,9 @@
 #!/bin/bash
 # run.sh
 
-client=(50000 40000 30000)
-prune_rates=(0.2 0.25)
-# prune_rates=(0.05 0.1 0.15)
+client=(50000 40000 30000 20000 10000)
+# prune_rates=(0.05)
+prune_rates=(0.05 0.1 0.15)
 
 for cid in "${client[@]}"; do
   for rate in "${prune_rates[@]}"; do

@@ -1,7 +1,7 @@
 import os
 import slackweb
 # Slack Webhook URL
-SLACKURL = 'https://hooks.slack.com/services/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'
+SLACKURL = 'YOUR_SLACK_WEBHOOK_URL_HERE'
 # slack送信メソッド
 def slackPost(message):
     slack = slackweb.Slack(url = SLACKURL)

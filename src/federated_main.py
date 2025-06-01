@@ -27,7 +27,8 @@ import json
 from torch.utils.data import DataLoader
 from collections import defaultdict
 import slackweb
-
+# Slack Webhook URL
+SLACKURL = 'YOUR_SLACK_WEBHOOK_URL_HERE'
 # slack送信メソッド
 def slackPost(message):
     slack = slackweb.Slack(url = SLACKURL)
