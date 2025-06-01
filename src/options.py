@@ -5,7 +5,7 @@ import argparse
 
 
 def args_parser():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(add_help=False)
 
     # federated arguments (Notation for the arguments followed from paper)
     parser.add_argument('--epochs', type=int, default=50,
@@ -76,7 +76,7 @@ def args_parser():
     parser.add_argument('--temp_io_dir', type=str, default='./client_io_temp_ccs', 
                         help="Directory for temporary client I/O files")
     parser.add_argument('--client_cpu_limits_str', type=str, default="{}", 
-                        help='String representation of a dict for client CPU limits e.g., "{0:20, 1:50, 2:80, 3:70, 4:40, 5:70, 6:100, 7:50, 8:80, 9:90, 10:70}"')
+                        help='String representation of a dict for client CPU limits e.g., "{0:100, 1:100, 2:100, 3:100, 4:100, 5:100, 6:100, 7:100, 8:100, 9:100, 10:100}"')
     parser.add_argument('--default_client_cpu_limit', type=int, default=100, 
                         help="Default CPU limit (%) if not specified for a client")
     parser.add_argument('--client_timeout', type=int, default=100000000000, 
@@ -98,5 +98,5 @@ def args_parser():
     parser.add_argument('--max_overall_reduction_rate', type=float, default=0.6, help="Max global data reduction") # 元の0.1から変更
     parser.add_argument('--min_samples_after_global_prune', type=int, default=20, help="Min samples kept globally post-CCS")
     parser.add_argument('--num_groups_ccs', type=int, default=100, help="Num clusters for CCS")
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
     return args

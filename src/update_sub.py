@@ -77,6 +77,12 @@ except ImportError:
         parser.add_argument('--max_overall_reduction_rate', type=float, default=0.6)
         parser.add_argument('--min_samples_after_global_prune', type=int, default=20)
         parser.add_argument('--num_groups_ccs', type=int, default=100)
+        parser.add_argument('--client_id', type=int, required=True, help='Client ID')
+        parser.add_argument('--global_model_path', type=str, required=True, help='Path to the global model')
+        parser.add_argument('--current_epoch', type=int, required=True, help='Current training epoch')
+        parser.add_argument('--data_indices_path', type=str, required=True, help='Path to client data indices')
+        parser.add_argument('--output_dir', type=str, required=True, help='Directory for output (model, stats, etc.)')
+
         return parser
 
 try:
@@ -261,20 +267,19 @@ class LocalUpdate(object):
         accuracy = correct/total if total > 0 else 0.0
         avg_loss = loss / num_batches_processed if num_batches_processed > 0 else 0.0
         return accuracy, avg_loss
-import sys
-print(f"Executing update_sub.py with arguments: {sys.argv}")
+# import sys
+# print(f"Executing update_sub.py with arguments: {sys.argv}")
 # --- サブプロセスとして実行される際のメイン処理ブロック ---
 if __name__ == '__main__':
     # 1. コマンドライン引数パーサーの定義
     parser = argparse.ArgumentParser(description="Client Update Subprocess Script for Federated Learning")
     
     # --- limited_ccs.py から渡される必須引数を定義 ---
-    parser.add_argument('--client_id', type=int, required=True)
-    parser.add_argument('--global_model_path', type=str, required=True)
-    parser.add_argument('--current_epoch', type=int, required=True)
-    parser.add_argument('--data_indices_path', type=str, required=True)
-    parser.add_argument('--output_dir', type=str, required=True)
-
+    parser.add_argument('--client_id', type=int, required=True, help='Client ID')
+    parser.add_argument('--global_model_path', type=str, required=True, help='Path to the global model file')
+    parser.add_argument('--current_epoch', type=int, required=True, help='Current epoch number')
+    parser.add_argument('--data_indices_path', type=str, required=True, help='Path to the data indices file')
+    parser.add_argument('--output_dir', type=str, required=True, help='Directory to save output files')
     # --- options.py から引き継ぐ共通の学習パラメータをここで定義 ---
     #     limited_ccs.py の cmd_list 作成ロジックで実際に渡されるものを網羅する
     default_args_source = main_args_parser_for_defaults_setup()
@@ -391,7 +396,7 @@ if __name__ == '__main__':
             if args_parsed_in_subprocess.dataset == 'mnist': client_model_for_training = CNNMnist(args=args_parsed_in_subprocess)
             elif args_parsed_in_subprocess.dataset == 'fmnist': client_model_for_training = CNNFashion_Mnist(args=args_parsed_in_subprocess)
             elif args_parsed_in_subprocess.dataset == 'cifar': 
-                client_model_for_training = CNNCifar(args=args_parsed_in_subprocess) # torchvision.models.resnet18も選択肢
+                client_model_for_training = torchvision.models.resnet18(num_classes=args_parsed_in_subprocess.num_classes)
         elif args_parsed_in_subprocess.model == 'mlp':
             if len(full_train_dataset_sub_loaded) == 0: raise ValueError("Full training dataset is empty for MLP.")
             try: sample_img_sub_for_mlp, _ = full_train_dataset_sub_loaded[0]
