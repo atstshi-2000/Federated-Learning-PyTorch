@@ -30,7 +30,7 @@ from collections import defaultdict
 import slackweb # SLACKURLが未定義、または設定が必要なら有効化
 
 # Slack Webhook URL (必要であれば設定)
-SLACKURL = 'YOUR_SLACK_WEBHOOK_URL_HERE'
+
 
 def slackPost(message):
     if 'SLACKURL' in globals() and SLACKURL != 'YOUR_SLACK_WEBHOOK_URL_HERE':
@@ -361,7 +361,7 @@ if __name__ == '__main__':
                 cpu_limit_val = args.default_client_cpu_limit
                 # args.client_cpu_limits_dict はメインスクリプトの最初で文字列からパース済みと仮定
                 if hasattr(args, 'client_cpu_limits_dict') and client_id_to_train in args.client_cpu_limits_dict:
-                     cpu_limit_val = args.client_cpu_limits_dict[client_id_to_train]
+                    cpu_limit_val = args.client_cpu_limits_dict[client_id_to_train]
                 
                 if cpu_limit_val < 100 and os.name == 'posix':
                     # cpulimitコマンドが存在するか確認
@@ -414,7 +414,7 @@ if __name__ == '__main__':
                 print(f"Client {client_info['cid']} (PID {client_info['pid']}) timed out. Killing process.")
                 client_info['process'].kill(); client_info['process'].wait()
             except FileNotFoundError: 
-                 print(f"Output file for client {client_info['cid']} (PID {client_info['pid']}) was unexpectedly missing after wait.")
+                print(f"Output file for client {client_info['cid']} (PID {client_info['pid']}) was unexpectedly missing after wait.")
             except Exception as e:
                 print(f"Error processing results or waiting for client {client_info['cid']} (PID {client_info['pid']}): {e}")
                 if client_info['process'].poll() is None: client_info['process'].kill(); client_info['process'].wait()
@@ -545,7 +545,7 @@ if __name__ == '__main__':
         report_lines.append(f"|---- Final Round Model Size (KB)   : {size_history[-1]:.1f}")
     report_lines.append("```")
     report = "\n".join(report_lines)
-    # slackPost(report) # 必要なら有効化
+    slackPost(report) # 必要なら有効化
 
     # 結果の保存
     filename_suffix = f"ds[{args.dataset}]_m[{args.model}]_ep[{args.epochs}]_usr[{args.num_users}]_fr[{args.frac}]_iid[{args.iid}]_lep[{args.local_ep}]_lbs[{args.local_bs}]_lr[{args.lr}]_sd[{args.seed}]"

@@ -1,8 +1,8 @@
 {
     "round": 11,
-    "wall_time_sec": 291.14711141586304,
-    "memory_MB": 1776.0,
+    "wall_time_sec": 293.1245093345642,
+    "memory_MB": 1784.43359375,
     "comm_KB": 43756.0478515625,
-    "accuracy_mean": 0.7649863913514272,
-    "accuracy_std": 0.016749018431091205
+    "accuracy_mean": 0.7774596509926194,
+    "accuracy_std": 0.009211786708131777
 }

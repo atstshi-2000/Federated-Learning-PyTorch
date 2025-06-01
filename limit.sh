@@ -3,7 +3,7 @@
 
 client=(10000)
 # prune_rates=(0.05)
-prune_rates=(0.05 0.1 0.15)
+prune_rates=(0.05)
 
 for cid in "${client[@]}"; do
   for rate in "${prune_rates[@]}"; do
