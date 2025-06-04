@@ -18,7 +18,7 @@ for cid in "${client[@]}"; do
       --local_ep 3 \
       --local_bs 32 \
       --verbose 0 \
-      --epoch 50 \
+      --epochs 50 \
       --gpu cuda:0 \
       --num_per_client "${cid}" \
       --prune_rate "${rate}"
