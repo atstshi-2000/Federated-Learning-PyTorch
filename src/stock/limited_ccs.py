@@ -30,7 +30,7 @@ from collections import defaultdict
 import slackweb # SLACKURLが未定義、または設定が必要なら有効化
 
 # Slack Webhook URL (必要であれば設定)
-
+SLACKURL = 'YOUR_SLACK_WEBHOOK_URL_HERE'
 
 def slackPost(message):
     if 'SLACKURL' in globals() and SLACKURL != 'YOUR_SLACK_WEBHOOK_URL_HERE':

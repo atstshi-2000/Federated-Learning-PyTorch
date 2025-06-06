@@ -6,6 +6,7 @@ import psutil
 import pickle
 import numpy as np
 import argparse
+import torchvision
 
 # プロジェクト内の他モジュールをインポートするために、必要に応じてsys.pathを設定
 # import sys
@@ -97,7 +98,7 @@ if __name__ == '__main__':
         if args.model == 'cnn':
             if args.dataset == 'mnist': client_model = CNNMnist(args=args)
             elif args.dataset == 'fmnist': client_model = CNNFashion_Mnist(args=args)
-            elif args.dataset == 'cifar': client_model = CNNCifar(args=args) # torchvision.models.resnet18 も選択肢だった
+            elif args.dataset == 'cifar': client_model = torchvision.models.resnet18(pretrained=True)
         elif args.model == 'mlp':
             # データセットの最初の要素から画像サイズを取得
             if len(full_train_dataset) == 0: raise ValueError("Full training dataset is empty.")
