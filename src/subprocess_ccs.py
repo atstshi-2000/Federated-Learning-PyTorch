@@ -166,7 +166,7 @@ if __name__ == '__main__':
     logger = SummaryWriter('../logs')
 
     args = args_parser()
-    #print(args)
+    
     exp_details(args)
     import torch
     print(torch.cuda.is_available())
@@ -250,7 +250,23 @@ if __name__ == '__main__':
     ta,tt,te_all,fin = 0,0,0,0
     total_data = 0
     local_models = [LocalUpdate(args=args, dataset=train_dataset, idxs=user_groups[idx], logger=logger, client_id=idx) for idx in range(args.num_users)]
+    print("=== LocalUpdate の属性一覧（クライアント 0） ===")
+    print(dir(local_models[0]))
+    base_dir = os.path.dirname(__file__)                # ".../Federated-Learning-PyTorch/src"
+    pruned_dir = os.path.join(base_dir, "pruned_data")
+    os.makedirs(pruned_dir, exist_ok=True)
+        #print(args)
+    for cid in range(args.num_users):
+        full_idxs = local_models[cid].idxs               # round 0 での全インデックス
+        full_ds   = local_models[cid].full_dataset       # 実際のデータセット
 
+        pruned_data = {
+            "idxs":   full_idxs,
+            "data":   [full_ds[i][0] for i in full_idxs],   # すべて Tensor のリスト
+            "labels": [full_ds[i][1] for i in full_idxs]
+        }
+        pruned_data_path = os.path.join(pruned_dir, f"client_{cid}_round0.pt")
+        torch.save(pruned_data, pruned_data_path)
 
     # クライアントオブジェクトのリストを作成
     clients = [LocalUpdate(args=args, dataset=train_dataset, idxs=user_groups[idx], logger=logger, client_id=idx) for idx in range(args.num_users)]
@@ -291,9 +307,33 @@ if __name__ == '__main__':
     el2n = args.el2n
     percent = args.percent
     start_time = time.time()
+    # [追加] Round 0 用の pruned_data を一度だけ作成・保存
+    # ───────────────────────────────────
+    base_dir = os.path.dirname(__file__)
+    pruned_dir = os.path.join(base_dir, "pruned_data")
+    os.makedirs(pruned_dir, exist_ok=True)
+    for cid in range(args.num_users):
+        # LocalUpdate オブジェクト作成時に渡した idxs が、
+        # round 0 の「絞り込む前の全データ」のインデックスリストです。
+        full_idxs = local_models[cid].idxs                  # round 0 時点では idxs が全データのインデックス
+        full_ds   = local_models[cid].full_dataset          # None になっていない、実際の Dataset オブジェクト
+
+        # train_dataset から full_idxs のサンプルだけを取り出す
+        pruned_data = {
+            "idxs": full_idxs,
+            "data":   [ full_ds[i][0] for i in full_idxs ],
+            "labels": [ full_ds[i][1] for i in full_idxs ]
+        }
+        pruned_data_path = os.path.join(pruned_dir, f"client_{cid}_round0.pt")
+        torch.save(pruned_data, pruned_data_path)
     for epoch in tqdm(range(args.epochs)):
         print(f"\n | Global Training Round : {epoch+1} |\n")
         global_model.train()
+        # まず「このラウンドのグローバル重み」をディスクに保存
+        base_dir = os.path.dirname(__file__)
+        global_weights_path = os.path.join(base_dir, f"global_model_round{epoch}.pth")
+        torch.save(global_model.state_dict(), global_weights_path)
+
         m = max(int(args.frac * args.num_users), 1)
         num_users = args.num_users
         idxs_users = np.random.choice(choice_users, m, replace=False)
@@ -338,45 +378,38 @@ if __name__ == '__main__':
                 global_to_local=global_to_local,
                 keep_ratio_per_client=keep_ratio_per_client
             )
-            #インクリメンタルCCS
-            # keep_global = i_ccs.update_and_select(all_scores, num_to_keep)
-            # keep_global = coverage_centric_selection(
-            # normalized,
-            # num_to_keep=num_to_keep,
-            # num_groups=num_groups
-            # )
-
-            # # クライアントごとに戻す
-            # for gidx in keep_global:
-            # cid, lid = global_to_local[gidx]
-            # client_keep[cid].append(lid)
-            # CCS 全体の終了
             t_ccs_all_end = time.monotonic()
 
             # 各クライアントに「同じ CCS 全体時間」を加算しておく
             for cid in range(args.num_users):
                 ccs_times[cid] += (t_ccs_all_end - t_ccs_all_start)
         # ========== [2] 再構築（全クライアント） ==========
-        if do_prune and cid in client_keep:
+        if do_prune:
             t_recon_start = time.monotonic()
             for cid in range(args.num_users):
                 keep_idx = client_keep.get(cid, [])
                 local_models[cid].update_dataset(keep_idx, el2n=args.el2n)
             t_recon_end = time.monotonic()
             for cid in range(args.num_users):
+                pruned_data = {
+                    'idxs': keep_idx,
+                    'data':    [local_models[cid].train_dataset[i][0] for i in keep_idx],
+                    'labels':  [local_models[cid].train_dataset[i][1] for i in keep_idx],
+                }
+                pruned_data_path = os.path.join(pruned_dir, f"client_{cid}_round{epoch}.pt")
+                torch.save(pruned_data, pruned_data_path)
+            for cid in range(args.num_users):
                 ccs_times[cid] += (t_recon_end - t_recon_start)
             last_client_keep = client_keep.copy() # ← ここで保存
         # ========== [3] 各クライアントのローカル学習 ==========
         # まず、今ラウンドのグローバルモデルをファイルに保存しておく
+        local_weights, local_losses = [], []
         for cid in idxs_users:
             model_path = f"client_{cid}_round{epoch}_model.pth"
-            torch.save(local_models[cid].state_dict(), model_path)
-            if not os.path.exists(model_path):
-                print(f"[Warning] {model_path} not found. Skipping this client.")
-                continue  # またはエラー処理へ
+            w_local, _ = local_models[cid].update_weights(global_model, epoch)
+            torch.save(w_local, model_path)            
             # ── (1) クライアントごとに使うスレッド数を取得 ──
-            num_threads = client_thread_limits.get(cid, 1)
-
+            num_threads = client_thread_limits.get(cid, 10)
             # ── (2) サブプロセス起動時の環境変数をコピーし、スレッド数を固定 ──
             env = os.environ.copy()
             env["OMP_NUM_THREADS"] = str(num_threads)
@@ -385,58 +418,72 @@ if __name__ == '__main__':
             # ── (3) サブプロセスで client_train.py を呼び出す ──
             #      必要な引数は「クライアントID」「現ラウンド」「グローバルモデルのパス」
             cmd = [
-                "python", "client_train.py",
-                "--cid", str(cid),
-                "--round", str(epoch),
-                "--global_model_path", model_path
+                "python3", "client_train.py",
+                "--client_id",        str(cid),
+                "--epoch",            str(epoch),
+                "--pruned_data_path", pruned_data_path,
+                "--device",           str(device),
+                "--seed",             str(args.seed),
+                "--model",            args.model,
+                "--dataset",          args.dataset,
+                "--lr",               str(args.lr),
+                "--optimizer",        args.optimizer,
+                "--local_ep",         str(args.local_ep),
+                "--global_model_path", global_weights_path,
+                "--iid",              str(int(args.iid)),             # 0 or 1
+                "--unequal",          str(int(args.unequal)),         # 0 or 1
+                "--num_users",        str(args.num_users),
+                "--num_per_client",   str(args.num_per_client)
             ]
 
             print(f"[Epoch {epoch+1}][Client {cid}] start training with {num_threads} threads")
             t_train_start = time.monotonic()
             result = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(__file__)   # ←ここで "src/" をカレントにする
-        )
-            if result.returncode != 0:
-                print(f"!! Client {cid} failed !! stderr:\n{result.stderr}")
-            else:
-                print(f"Client {cid} stdout summary:\n{result.stdout.splitlines()[-1]}")
+                cmd,
+                env=env,
+                capture_output=True,
+                text=True,
+                cwd=base_dir   # ←ここで "src/" をカレントにする
+            )
             t_train_end = time.monotonic()
-
             if result.returncode != 0:
-                print(f"!! Client {cid} failed !! stderr:\n{result.stderr}")
-                # 必要ならここで raise するかスキップする
-            else:
-                # サブプロセス側で last line に学習結果を print しているので出力表示
-                print(f"Client {cid} stdout summary:\n{result.stdout.splitlines()[-1]}")
+                print(f"!! Client {cid} failed !! returncode={result.returncode}")
+                print(f"--- STDOUT start ---\n{result.stdout}--- STDOUT end ---")
+                print(f"--- STDERR start ---\n{result.stderr}--- STDERR end ---")
+                continue
 
             # ── (4) サブプロセスで作成された「クライアントモデル」と「メトリクス」を読み込む ──
             #  - client_{cid}_round{epoch}_model.pth  (重みファイル)
             #  - metrics_{cid}_round{epoch}.json       (loss, avg_cpu, avg_mem を含むJSON)
-            local_weights.append(torch.load(model_path, map_location=device))
+            metrics_file = f"metrics_{cid}_round{epoch}.json"
+            if not os.path.exists(metrics_file):
+                print(f"[Warning] metrics file not found for client {cid}, round {epoch}: {metrics_file}")
+                continue
 
-            info = json.loads(open(f"metrics_{cid}_round{epoch}.json", "r").read())
+            info = json.loads(open(metrics_file, "r").read())
             cpu_usages[cid] = info["avg_cpu"]
             mem_usages[cid] = info["avg_mem"]
+            local_losses.append(info["loss"])
+            # ── (3.6) サブプロセス側で生成された「クライアントモデル」を読み込む ──
+            local_weights.append(torch.load(model_path, map_location=device))   
 
             print(f"[Epoch {epoch+1}][Client {cid}] "
                 f"avg_cpu={cpu_usages[cid]:.1f}%, avg_mem={cpu_usages[cid]:.1f}MB, "
                 f"train_time={(t_train_end - t_train_start):.3f}s")
 
             train_times[cid] += (t_train_end - t_train_start)
-            local_losses.append(info["loss"])
-                # クライアントごとの時間を都度出力
+            # クライアントごとの時間を都度出力
             print(f"[Epoch {epoch+1}][Client {cid}] "
                     f"CCS time: {ccs_times[cid]:.3f}s, "
                     f"Train time: {t_train_end - t_train_start:.3f}s")
-       # ========== [3] グローバルモデル更新 ==========
-        global_weights = average_weights(local_weights)
-        global_model.load_state_dict(global_weights)
-        loss_avg = sum(local_losses) / len(local_losses)
-        train_loss.append(loss_avg)
+        # === [4] フェデレーテッド集約（FedAvg など） ===
+        if len(local_weights) > 0:
+            global_weights = average_weights(local_weights)
+            global_model.load_state_dict(global_weights)
+            loss_avg = sum(local_losses) / len(local_losses)
+            train_loss.append(loss_avg)
+        else:
+            print(f"[Warning] No client finished successfully in round {epoch}")
         # ========== [4] 評価 & ログ ==========
         list_acc = []
         global_model.eval()
@@ -445,8 +492,10 @@ if __name__ == '__main__':
             list_acc.append(acc)
         train_accuracy.append(sum(list_acc)/len(list_acc))
         print(f' \nAvg Training Stats after {epoch+1} global rounds:')
-        print(f'Training Loss : {loss_avg:.4f}')
-        print(f'Train Accuracy: {100*train_accuracy[-1]:.2f}%\n')
+        if loss_avg is not None:
+            print(f'Training Loss : {loss_avg:.4f}')
+        else:
+            print(f'Training Loss : N/A (all clients failed in round {epoch})')
         total_ccs = sum(ccs_times.values())/num_users
         total_train = sum(train_times.values())
         print(f"=== Overall CCS time: {total_ccs:.3f}s ===")
