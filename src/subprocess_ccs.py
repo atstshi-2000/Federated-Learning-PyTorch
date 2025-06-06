@@ -265,8 +265,8 @@ if __name__ == '__main__':
             "data":   [full_ds[i][0] for i in full_idxs],   # すべて Tensor のリスト
             "labels": [full_ds[i][1] for i in full_idxs]
         }
-        pruned_data_path = os.path.join(pruned_dir, f"client_{cid}_round0.pt")
-        torch.save(pruned_data, pruned_data_path)
+        pruned_data_path_cid = os.path.join(pruned_dir, f"client_{cid}_round0.pt")
+        torch.save(pruned_data, pruned_data_path_cid)
 
     # クライアントオブジェクトのリストを作成
     clients = [LocalUpdate(args=args, dataset=train_dataset, idxs=user_groups[idx], logger=logger, client_id=idx) for idx in range(args.num_users)]
@@ -324,8 +324,8 @@ if __name__ == '__main__':
             "data":   [ full_ds[i][0] for i in full_idxs ],
             "labels": [ full_ds[i][1] for i in full_idxs ]
         }
-        pruned_data_path = os.path.join(pruned_dir, f"client_{cid}_round0.pt")
-        torch.save(pruned_data, pruned_data_path)
+        pruned_data_path_cid = os.path.join(pruned_dir, f"client_{cid}_round0.pt")
+        torch.save(pruned_data, pruned_data_path_cid)
     for epoch in tqdm(range(args.epochs)):
         print(f"\n | Global Training Round : {epoch+1} |\n")
         global_model.train()
@@ -396,8 +396,8 @@ if __name__ == '__main__':
                     'data':    [local_models[cid].train_dataset[i][0] for i in keep_idx],
                     'labels':  [local_models[cid].train_dataset[i][1] for i in keep_idx],
                 }
-                pruned_data_path = os.path.join(pruned_dir, f"client_{cid}_round{epoch}.pt")
-                torch.save(pruned_data, pruned_data_path)
+                pruned_data_path_cid = os.path.join(pruned_dir, f"client_{cid}_round{epoch}.pt")
+                torch.save(pruned_data, pruned_data_path_cid)
             for cid in range(args.num_users):
                 ccs_times[cid] += (t_recon_end - t_recon_start)
             last_client_keep = client_keep.copy() # ← ここで保存
@@ -421,7 +421,7 @@ if __name__ == '__main__':
                 "python3", "client_train.py",
                 "--client_id",        str(cid),
                 "--epoch",            str(epoch),
-                "--pruned_data_path", pruned_data_path,
+                "--pruned_data_path", pruned_data_path_cid,
                 "--device",           str(device),
                 "--seed",             str(args.seed),
                 "--model",            args.model,

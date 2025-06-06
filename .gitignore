@@ -1,1 +1,1 @@
-__pycache__/\n*.pyc\n*.pyo\n*.pyd\n*.env\n*.venv\ndata/\nlogs/\nsave/\nPipfile.lock\n*.npy\n*.json
+__pycache__/\n*.pyc\n*.pyo\n*.pyd\n*.env\n*.venv\ndata/\nlogs/\nsave/\nPipfile.lock\n*.npy\n*.json\n*.pth\nmetrics_*.json\npruned_data/*.pt
