@@ -82,6 +82,34 @@ class LocalUpdate(object):
         self.trainloader.dataset.idxs = keep_idxs
         print(f"Updated dataset size: {len(self.trainloader.dataset)}")
 
+    def update_dataset_sub(self, keep_idx, el2n):
+            """Update the dataset with the given indices."""
+            
+            # 1. 現在の学習で使われている「データセット全体におけるインデックス」のリストを取得します。
+            current_global_indices = self.idxs_train
+
+            # 2. プルーニングアルゴリズムが返した「ローカルインデックス」(keep_idx) を使って、
+            #    保持すべき「グローバルインデックス」の新しいリストを作成します。
+            new_global_indices = [current_global_indices[i] for i in keep_idx]
+
+            # 3.【最重要修正点】
+            #    メインスクリプト(subprocess_ccs.py)が結果を読み取るために参照する
+            #    self.pruned_idxs を、新しいグローバルインデックスのリストで更新します。
+            if el2n:
+                self.pruned_idxs = new_global_indices
+            else:
+                # el2nを使わない場合のフォールバック
+                self.idxs_train = new_global_indices
+                self.pruned_idxs = new_global_indices
+
+            # 4. このオブジェクト内部のデータローダーも、新しいインデックスリストで更新します。
+            self.trainloader = DataLoader(
+                DatasetSplit(self.full_dataset, new_global_indices),
+                batch_size=self.args.local_bs, shuffle=True, drop_last=True
+            )
+            
+            # 5. 正しく更新されたデータ数を表示します。
+            print(f"Updated dataset size: {len(new_global_indices)}")
     def train_val_test(self, dataset, idxs):
         """Returns train, validation and test dataloaders for a given dataset and user indexes."""
 

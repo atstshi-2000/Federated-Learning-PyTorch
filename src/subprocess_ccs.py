@@ -30,12 +30,16 @@ import slackweb
 import subprocess
 
 # Slack Webhook URL
-SLACKURL = 'YOUR_SLACK_WEBHOOK_URL_HERE'
+SLACKURL = 'https://hooks.slack.com/services/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'
 
 # slack送信メソッド
+# slack送信メソッド
 def slackPost(message):
-    slack = slackweb.Slack(url=SLACKURL)
-    slack.notify(text=message)
+    try:
+        slack = slackweb.Slack(url=SLACKURL)
+        slack.notify(text=message)
+    except Exception as e:
+        print(f"Slack notification failed: {e}")
 
 def compute_keep_ratios(
     exec_times: dict,
@@ -67,19 +71,15 @@ def compute_keep_ratios(
 
     cids = list(exec_times.keys())
     n = len(cids)
-
     # 1) 実行時間の逆数
     times = np.array([exec_times[cid] for cid in cids])
     inv_time = 1.0 / (times + 1e-8)
-
     # 2) CPU 使用率の逆数
     cpus = np.array([cpu_usages[cid] for cid in cids])
     inv_cpu = 1.0 / (cpus + 1e-8)
-
     # 3) メモリ使用量の逆数
     mems = np.array([mem_usages[cid] for cid in cids])
     inv_mem = 1.0 / (mems + 1e-8)
-
     # - 正規化（0～1 にスケーリング）
     def normalize(x):
         mn, mx = x.min(), x.max()
@@ -90,13 +90,10 @@ def compute_keep_ratios(
     norm_time = normalize(inv_time)
     norm_cpu  = normalize(inv_cpu)
     norm_mem  = normalize(inv_mem)
-
     # 4) 重みづけ合成（0～1 の範囲）
     mixed = alpha_time * norm_time + alpha_cpu * norm_cpu + alpha_mem * norm_mem
-
     # 5) すべて非負にしておく（念のため）
     mixed = np.clip(mixed, 0.0, None)
-
     # 6) 「クライアント間で合計＝1」に正規化
     total = mixed.sum()
     if total < 1e-8:
@@ -104,7 +101,6 @@ def compute_keep_ratios(
         normed = np.ones_like(mixed) / n
     else:
         normed = mixed / total
-
     # 7) 最後に [min_ratio, max_ratio] にマッピングすると合計が1を外れる可能性があるので、
     #    まず min_ratio～max_ratio の範囲にスケールし、その後でクライアント間で再調整して合計1.0へ
     #    (a) 仮に min_ratio～max_ratio にリニア変換してみる
@@ -135,14 +131,11 @@ def log_metrics(round_num, train_time, model, accuracies, log_path="logs"):
     """
     # メモリ使用量
     memory_usage = psutil.Process().memory_info().rss / (1024 ** 2)  # MB単位
-
     # 通信サイズ
     model_size = len(pickle.dumps(model.state_dict())) / 1024  # KB単位
-
     # 精度のばらつき
-    accuracy_mean = np.mean(accuracies)
-    accuracy_std = np.std(accuracies)
-
+    accuracy_mean = np.mean(accuracies) if accuracies else 0.0
+    accuracy_std = np.std(accuracies) if accuracies else 0.0
     # ログを保存
     log_data = {
         "round": round_num,
@@ -155,7 +148,6 @@ def log_metrics(round_num, train_time, model, accuracies, log_path="logs"):
     os.makedirs(log_path, exist_ok=True)
     with open(os.path.join(log_path, f"round_{round_num}.json"), "w") as f:
         json.dump(log_data, f, indent=4)
-
     # 返り値を追加
     return memory_usage, model_size
 
@@ -164,13 +156,9 @@ if __name__ == '__main__':
     # define paths
     path_project = os.path.abspath('..')
     logger = SummaryWriter('../logs')
-
     args = args_parser()
-    
     exp_details(args)
-    import torch
-    print(torch.cuda.is_available())
-    print(torch.cuda.device_count())
+    print(f"CUDA available: {torch.cuda.is_available()}")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():
         device = torch.device(f"{args.gpu}")
@@ -182,8 +170,7 @@ if __name__ == '__main__':
     train_dataset, test_dataset, user_groups = get_dataset(args)
     # el2n scores setup
     el2n_scores = {uid: [] for uid in range(args.num_users)}
-    print("num of train dataset = ", len(train_dataset))
-    print("num of test dataset = ", len(test_dataset))
+    print(f"Total train samples: {len(train_dataset)}, Total test samples: {len(test_dataset)}")
 
 
 
@@ -222,10 +209,7 @@ if __name__ == '__main__':
     # Set the model to train and send it to device.
     global_model.to(device)
     global_model.train()
-    print("global_model = ",global_model)
-
-
-
+    print(f"global_model = {global_model}")
     # copy weights
     global_weights = global_model.state_dict()
 
@@ -250,27 +234,16 @@ if __name__ == '__main__':
     ta,tt,te_all,fin = 0,0,0,0
     total_data = 0
     local_models = [LocalUpdate(args=args, dataset=train_dataset, idxs=user_groups[idx], logger=logger, client_id=idx) for idx in range(args.num_users)]
-    print("=== LocalUpdate の属性一覧（クライアント 0） ===")
-    print(dir(local_models[0]))
+    # print("=== LocalUpdate の属性一覧（クライアント 0） ===")
+    # print(dir(local_models[0]))
     base_dir = os.path.dirname(__file__)                # ".../Federated-Learning-PyTorch/src"
     pruned_dir = os.path.join(base_dir, "pruned_data")
     os.makedirs(pruned_dir, exist_ok=True)
         #print(args)
-    for cid in range(args.num_users):
-        full_idxs = local_models[cid].idxs               # round 0 での全インデックス
-        full_ds   = local_models[cid].full_dataset       # 実際のデータセット
-
-        pruned_data = {
-            "idxs":   full_idxs,
-            "data":   [full_ds[i][0] for i in full_idxs],   # すべて Tensor のリスト
-            "labels": [full_ds[i][1] for i in full_idxs]
-        }
-        pruned_data_path_cid = os.path.join(pruned_dir, f"client_{cid}_round0.pt")
-        torch.save(pruned_data, pruned_data_path_cid)
-
+    
     # クライアントオブジェクトのリストを作成
     clients = [LocalUpdate(args=args, dataset=train_dataset, idxs=user_groups[idx], logger=logger, client_id=idx) for idx in range(args.num_users)]
-
+    client_keep = defaultdict(list)
     # 事前：全クライアントのCCS時間・学習時間をためる辞書を用意
     ccs_times = {cid: 0.0 for cid in range(args.num_users)}
     train_times = {cid: 0.0 for cid in range(args.num_users)}
@@ -292,7 +265,7 @@ if __name__ == '__main__':
     8: 10,
     9: 9,
     10: 11,
-}
+    }
     alpha = 0.3  # EMA 平滑係数
     # ループ前に空のリストを用意
     mem_history = [] # 各ラウンドの memory_MB を格納
@@ -306,40 +279,56 @@ if __name__ == '__main__':
         org_num = 48000 / args.num_users
     el2n = args.el2n
     percent = args.percent
-    start_time = time.time()
+    
     # [追加] Round 0 用の pruned_data を一度だけ作成・保存
     # ───────────────────────────────────
+    # base_dir = os.path.dirname(__file__)
+    # pruned_dir = os.path.join(base_dir, "pruned_data")
+    # os.makedirs(pruned_dir, exist_ok=True)
     base_dir = os.path.dirname(__file__)
     pruned_dir = os.path.join(base_dir, "pruned_data")
+    json_dir = os.path.join(base_dir, "JSON")
+    pth_dir = os.path.join(base_dir, "PTH")
     os.makedirs(pruned_dir, exist_ok=True)
+    os.makedirs(json_dir, exist_ok=True)
+    os.makedirs(pth_dir, exist_ok=True)
     for cid in range(args.num_users):
         # LocalUpdate オブジェクト作成時に渡した idxs が、
         # round 0 の「絞り込む前の全データ」のインデックスリストです。
-        full_idxs = local_models[cid].idxs                  # round 0 時点では idxs が全データのインデックス
+        full_idxs = local_models[cid].idxs_train             # round 0 時点では idxs が全データのインデックス
         full_ds   = local_models[cid].full_dataset          # None になっていない、実際の Dataset オブジェクト
 
         # train_dataset から full_idxs のサンプルだけを取り出す
         pruned_data = {
             "idxs": full_idxs,
-            "data":   [ full_ds[i][0] for i in full_idxs ],
-            "labels": [ full_ds[i][1] for i in full_idxs ]
+            "data":   [ train_dataset[i][0] for i in full_idxs ],
+            "labels": [ train_dataset[i][1] for i in full_idxs ]
         }
         pruned_data_path_cid = os.path.join(pruned_dir, f"client_{cid}_round0.pt")
         torch.save(pruned_data, pruned_data_path_cid)
+    start_time = time.time()
     for epoch in tqdm(range(args.epochs)):
+        loss_avg = None # この行を追加
         print(f"\n | Global Training Round : {epoch+1} |\n")
         global_model.train()
+
         # まず「このラウンドのグローバル重み」をディスクに保存
-        base_dir = os.path.dirname(__file__)
-        global_weights_path = os.path.join(base_dir, f"global_model_round{epoch}.pth")
+        
+        global_weights_path = os.path.join(pth_dir, f"global_model_round{epoch}.pth")
         torch.save(global_model.state_dict(), global_weights_path)
 
         m = max(int(args.frac * args.num_users), 1)
         num_users = args.num_users
         idxs_users = np.random.choice(choice_users, m, replace=False)
         print("Selected users:", idxs_users)
-        do_prune = (global_round >= 10 and global_round % 10 == 0)
-        client_keep = defaultdict(list)
+        # --- 1. Pruning Decision ---
+        start_prune_round = getattr(args, 'start_prune_round', 10)
+        prune_interval = getattr(args, 'prune_interval', 10)
+        do_prune = (args.el2n != 0 and
+                    epoch >= (start_prune_round - 1) and
+                    (epoch - (start_prune_round - 1)) % prune_interval == 0)
+        
+        
         local_weights, local_losses = [], []
         # ========== [1] EL2Nスコア収集と CCS 実行（10エポックごと） ==========
         if do_prune:
@@ -355,10 +344,9 @@ if __name__ == '__main__':
             all_scores = np.concatenate(all_scores, axis=0)
             N_total = len(all_scores)
             # CCS 実行
-            prune_rate = args.prune_rate
-            remaining_ratio = 1.0 - prune_rate * (epoch // 10)
-            remaining_ratio = max(0.0, remaining_ratio)
-            num_to_keep = int(N_total * remaining_ratio)
+            prune_level = (epoch - (start_prune_round - 1)) // prune_interval + 1
+            reduction_rate = min(args.prune_rate * prune_level, 0.8) 
+            num_to_keep = int(len(all_scores) * (1 - reduction_rate))
             num_groups = 100
             # ===== 新規追加: 各クライアントのリソースに応じて保持比率を決定 =====
             keep_ratio_per_client = compute_keep_ratios(
@@ -378,52 +366,55 @@ if __name__ == '__main__':
                 global_to_local=global_to_local,
                 keep_ratio_per_client=keep_ratio_per_client
             )
+            last_client_keep = client_keep.copy()
+            
+        # ========== [2] 再構築（全クライアント） ==========
+            for cid in range(args.num_users):
+                keep_idx = client_keep.get(cid, [])
+                local_models[cid].update_dataset_sub(keep_idx, el2n=args.el2n)
+                global_keep_idxs = local_models[cid].pruned_idxs
+                pruned_data = {
+                    # 【修正点c】保存するインデックスもグローバルインデックスに統一
+                    'idxs': global_keep_idxs, 
+                    'data':   [train_dataset[i][0] for i in global_keep_idxs],
+                    'labels': [train_dataset[i][1] for i in global_keep_idxs],
+                }
+                pruned_data_path = os.path.join(pruned_dir, f"client_{cid}_round{epoch}.pt")
+                torch.save(pruned_data, pruned_data_path)
             t_ccs_all_end = time.monotonic()
-
             # 各クライアントに「同じ CCS 全体時間」を加算しておく
             for cid in range(args.num_users):
                 ccs_times[cid] += (t_ccs_all_end - t_ccs_all_start)
-        # ========== [2] 再構築（全クライアント） ==========
-        if do_prune:
-            t_recon_start = time.monotonic()
-            for cid in range(args.num_users):
-                keep_idx = client_keep.get(cid, [])
-                local_models[cid].update_dataset(keep_idx, el2n=args.el2n)
-            t_recon_end = time.monotonic()
-            for cid in range(args.num_users):
-                pruned_data = {
-                    'idxs': keep_idx,
-                    'data':    [local_models[cid].train_dataset[i][0] for i in keep_idx],
-                    'labels':  [local_models[cid].train_dataset[i][1] for i in keep_idx],
-                }
-                pruned_data_path_cid = os.path.join(pruned_dir, f"client_{cid}_round{epoch}.pt")
-                torch.save(pruned_data, pruned_data_path_cid)
-            for cid in range(args.num_users):
-                ccs_times[cid] += (t_recon_end - t_recon_start)
-            last_client_keep = client_keep.copy() # ← ここで保存
         # ========== [3] 各クライアントのローカル学習 ==========
         # まず、今ラウンドのグローバルモデルをファイルに保存しておく
         local_weights, local_losses = [], []
         for cid in idxs_users:
-            model_path = f"client_{cid}_round{epoch}_model.pth"
-            w_local, _ = local_models[cid].update_weights(global_model, epoch)
-            torch.save(w_local, model_path)            
+            if args.el2n != 0 and epoch >= (start_prune_round - 1):
+                offset = epoch - (start_prune_round - 1)
+                pruning_epoch = (start_prune_round - 1) + (offset // prune_interval) * prune_interval
+            else:
+                pruning_epoch = 0
+            
+            pruned_data_path = os.path.join(pruned_dir, f"client_{cid}_round{pruning_epoch}.pt")
+            client_seed = args.seed + cid + (epoch * args.num_users)
+            
+            # 決定したラウンドに基づいて、読み込むデータファイルのパスを生成
+            pruned_data_path = os.path.join(pruned_dir, f"client_{cid}_round{pruning_epoch}.pt")
             # ── (1) クライアントごとに使うスレッド数を取得 ──
             num_threads = client_thread_limits.get(cid, 10)
             # ── (2) サブプロセス起動時の環境変数をコピーし、スレッド数を固定 ──
             env = os.environ.copy()
             env["OMP_NUM_THREADS"] = str(num_threads)
             env["MKL_NUM_THREADS"] = str(num_threads)
-
             # ── (3) サブプロセスで client_train.py を呼び出す ──
             #      必要な引数は「クライアントID」「現ラウンド」「グローバルモデルのパス」
             cmd = [
                 "python3", "client_train.py",
                 "--client_id",        str(cid),
                 "--epoch",            str(epoch),
-                "--pruned_data_path", pruned_data_path_cid,
+                "--pruned_data_path", pruned_data_path,
                 "--device",           str(device),
-                "--seed",             str(args.seed),
+                "--seed",             str(client_seed),
                 "--model",            args.model,
                 "--dataset",          args.dataset,
                 "--lr",               str(args.lr),
@@ -433,16 +424,19 @@ if __name__ == '__main__':
                 "--iid",              str(int(args.iid)),             # 0 or 1
                 "--unequal",          str(int(args.unequal)),         # 0 or 1
                 "--num_users",        str(args.num_users),
-                "--num_per_client",   str(args.num_per_client)
-            ]
+                "--num_per_client",   str(args.num_per_client),
+                "--num_classes",      str(args.num_classes), # この行を追加
+                "--output_model_path", os.path.join(pth_dir, f"client_{cid}_round{epoch}_model.pth"),
+                "--output_metrics_path", os.path.join(json_dir, f"metrics_{cid}_round{epoch}.json"),
+                ]
 
             print(f"[Epoch {epoch+1}][Client {cid}] start training with {num_threads} threads")
             t_train_start = time.monotonic()
             result = subprocess.run(
                 cmd,
                 env=env,
-                capture_output=True,
-                text=True,
+                # capture_output=True,
+                # text=True,
                 cwd=base_dir   # ←ここで "src/" をカレントにする
             )
             t_train_end = time.monotonic()
@@ -455,27 +449,29 @@ if __name__ == '__main__':
             # ── (4) サブプロセスで作成された「クライアントモデル」と「メトリクス」を読み込む ──
             #  - client_{cid}_round{epoch}_model.pth  (重みファイル)
             #  - metrics_{cid}_round{epoch}.json       (loss, avg_cpu, avg_mem を含むJSON)
-            metrics_file = f"metrics_{cid}_round{epoch}.json"
+            metrics_file = os.path.join(json_dir, f"metrics_{cid}_round{epoch}.json")
             if not os.path.exists(metrics_file):
                 print(f"[Warning] metrics file not found for client {cid}, round {epoch}: {metrics_file}")
                 continue
 
-            info = json.loads(open(metrics_file, "r").read())
+            with open(metrics_file, "r") as f:
+                info = json.load(f)
+
             cpu_usages[cid] = info["avg_cpu"]
             mem_usages[cid] = info["avg_mem"]
             local_losses.append(info["loss"])
             # ── (3.6) サブプロセス側で生成された「クライアントモデル」を読み込む ──
-            local_weights.append(torch.load(model_path, map_location=device))   
+            # ── (3.6) サブプロセス側で生成された「クライアントモデル」を読み込む ──
+            # 【修正】srcディレクトリを基準としたパスを指定する
+            # モデルの読み込みパスを修正
+            model_load_path = os.path.join(pth_dir, f"client_{cid}_round{epoch}_model.pth")
+            local_weights.append(torch.load(model_load_path, map_location=device))
 
             print(f"[Epoch {epoch+1}][Client {cid}] "
                 f"avg_cpu={cpu_usages[cid]:.1f}%, avg_mem={cpu_usages[cid]:.1f}MB, "
                 f"train_time={(t_train_end - t_train_start):.3f}s")
 
             train_times[cid] += (t_train_end - t_train_start)
-            # クライアントごとの時間を都度出力
-            print(f"[Epoch {epoch+1}][Client {cid}] "
-                    f"CCS time: {ccs_times[cid]:.3f}s, "
-                    f"Train time: {t_train_end - t_train_start:.3f}s")
         # === [4] フェデレーテッド集約（FedAvg など） ===
         if len(local_weights) > 0:
             global_weights = average_weights(local_weights)
@@ -496,6 +492,7 @@ if __name__ == '__main__':
             print(f'Training Loss : {loss_avg:.4f}')
         else:
             print(f'Training Loss : N/A (all clients failed in round {epoch})')
+        print(f'Train Accuracy: {100*train_accuracy[-1]:.2f}%\n')
         total_ccs = sum(ccs_times.values())/num_users
         total_train = sum(train_times.values())
         print(f"=== Overall CCS time: {total_ccs:.3f}s ===")
@@ -506,7 +503,7 @@ if __name__ == '__main__':
             train_time=time.time() - start_time,
             model=global_model,
             accuracies=list_acc,
-            log_path="logs")
+            log_path=json_dir)
         # ラウンドごとにリストへ追加
         mem_history.append(mem_mb)
         size_history.append(model_kb)
@@ -537,6 +534,7 @@ if __name__ == '__main__':
         f"el2n time = : {total_ccs:.3f}s",
         f"Train time = : {total_train:.3f}s",
         f"total time = : {all_time:.3f}s",
+        f"local_ep = {args.local_ep}",
         "",
         "各クライアントデータセット:"
     ]

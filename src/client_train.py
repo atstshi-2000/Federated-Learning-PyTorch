@@ -19,7 +19,8 @@ import copy
 
 # 元のメイン側で使っている args_parser をインポート
 from options import args_parser as main_args_parser
-
+from torch.utils.data import DataLoader, Dataset
+import torchvision.transforms as transforms
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -57,18 +58,38 @@ def parse_args():
                         help="全クライアント数(メインと合わせること)")
     parser.add_argument("--num_per_client", type=int, default=0,
                         help="IID 分割時の1クライアントあたりサンプル数 (IID=1 のとき使用)")
+    parser.add_argument("--num_classes", type=int, required=True,
+                        help="データセットのクラス数")
+    parser.add_argument("--output_model_path", type=str, required=True,
+                        help="学習済みモデルの保存先パス")
+    parser.add_argument("--output_metrics_path", type=str, required=True,
+                        help="メトリクスJSONの保存先パス")
     return parser.parse_args()
 
+class PrunedDataset(Dataset):
+    def __init__(self, data_list, label_list, transform=None):
+        self.data_list  = data_list
+        self.label_list = label_list
+        self.transform  = transform
 
+    def __len__(self):
+        return len(self.data_list)
+
+    def __getitem__(self, idx):
+        x = self.data_list[idx]
+        y = self.label_list[idx]
+        if self.transform is not None:
+            x = self.transform(x)
+        return x, y
 
 if __name__ == '__main__':
-    print("DEBUG0: main.py started, parsing args...")
+    # print("DEBUG0: main.py started, parsing args...")
     args = parse_args()
 
     # exp_details(args) は client 側では不要なので呼ばない
 
     # ――― デバイス設定 ―――
-    print("DEBUG1: parse_args OK, args =", args)
+    # print("DEBUG1: parse_args OK, args =", args)
     if torch.cuda.is_available():
         device = torch.device(args.device)
     else:
@@ -77,110 +98,66 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
 
        # ――― get_dataset で元の全データを一度に取得 ―――
-    print("DEBUG3: About to call get_dataset")
-    train_dataset, test_dataset, user_groups = get_dataset(args)
-    print("DEBUG4: get_dataset OK, len(train_dataset) =", len(train_dataset))
-    # ――― グローバルモデル定義＆重みロード ―――
-    print("DEBUG5: About to define + load global_model")
+    # print("DEBUG3: About to call get_dataset")
+    # train_dataset, test_dataset, user_groups = get_dataset(args)
+    # print("DEBUG4: get_dataset OK, len(train_dataset) =", len(train_dataset))
+    # ――― Global モデルの構築 & 重みロード ―――
+    # print("DEBUG5: About to define + load global_model")
     if args.model == 'cnn':
         if args.dataset == 'mnist':
             global_model = CNNMnist(args=args)
         elif args.dataset == 'fmnist':
             global_model = CNNFashion_Mnist(args=args)
         elif args.dataset == 'cifar':
-            # get_dataset が CIFAR10 を作ってくれているので、
-            # ここではモデルだけ定義すればよい
-            global_model = torchvision.models.resnet18(
-                num_classes=args.num_users
-            )
+            # ↓ ここを修正 ↓
+            global_model = torchvision.models.resnet18(num_classes=args.num_classes)
         else:
             raise ValueError("Unknown dataset")
 
     elif args.model == 'mlp':
-        # MLP の入力次元は get_dataset と合わせる前提で決める
-        if args.dataset in ["mnist", "fmnist"]:
-            dim_in = 28 * 28
-        else:
-            # CIFAR で MLP を使いたいなら 3×32×32 など適宜変更
-            dim_in = 3 * 32 * 32
-        global_model = MLP(dim_in=dim_in, dim_hidden=64, dim_out=args.num_users)
+        img_size = 3072  # CIFAR-10 の場合は 32x32x3 = 3072
+        len_in = 1
+        for x in img_size:
+            len_in *= x
+        # ↓ ここを修正 ↓
+        global_model = MLP(dim_in=len_in, dim_hidden=64, dim_out=args.num_classes)
     else:
         raise ValueError("Unknown model type")
+
+    # 重複していた2つ目のモデル定義ブロックは削除する
 
     try:
         global_model.load_state_dict(torch.load(args.global_model_path, map_location=device))
     except Exception as e:
         print(f"[Client {args.client_id}] ERROR loading global model: {e}")
         exit(1)
-    global_model.to(device)
-    global_model.train()
-    # ――― Global モデルの構築 & 重みロード ―――
-    if args.model == 'cnn':
-        if args.dataset == 'mnist':
-            global_model = CNNMnist(args=args)
-        elif args.dataset == 'fmnist':
-            global_model = CNNFashion_Mnist(args=args)
-        elif args.dataset == 'cifar':
-            # CIFAR の場合、main 側では num_classes=args.num_users で ResNet18 を作っている想定
-            global_model = torchvision.models.resnet18(num_classes=args.num_users)
-        else:
-            raise ValueError("Unknown dataset")
-    elif args.model == 'mlp':
-        # MLP の入力次元は「データのサイズ」から推定してもよいですが、
-        # 本来は main で決めた dim_in を args で渡しておくのがベターです。
-        # ここでは仮に 28*28=784 としておく（MNIST の場合）
-        dim_in = 1
-        if args.dataset in ["mnist", "fmnist"]:
-            dim_in = 28*28
-        else:
-            # 他の dataset では適宜書き換えてください
-            raise ValueError("MLP の場合、MNIST/FMNIST のみ対応")
-        global_model = MLP(dim_in=dim_in, dim_hidden=64, dim_out=args.num_users)
-    else:
-        raise ValueError("Unknown model type")
-    print("DEBUG6: Loaded global_model from", args.global_model_path)
-    # Global model の重みをサブプロセス側に渡されたパスから読み込む
-    try:
-        global_model.load_state_dict(torch.load(args.global_model_path, map_location=device))
-    except Exception as e:
-        print(f"[Client {args.cid}] ERROR: failed to load global model at '{args.global_model_path}': {e}")
-        exit(1)
 
     global_model.to(device)
     global_model.train()
-    print("DEBUG7: About to load pruned_data from", args.pruned_data_path)
+    # print("DEBUG6: Loaded global_model from", args.global_model_path)
+
+    # print("DEBUG7: About to load pruned_data from", args.pruned_data_path)
     pruned = torch.load(args.pruned_data_path, map_location="cpu")
-    print("DEBUG8: pruned_data keys =", list(pruned.keys()))
+    # print("DEBUG8: pruned_data keys =", list(pruned.keys()))
     data_list  = pruned["data"]
     label_list = pruned["labels"]
-    print("DEBUG9: data_list length =", len(data_list), "label_list length =", len(label_list))
-    from torch.utils.data import DataLoader, Dataset
-    import torchvision.transforms as transforms
+    # print("DEBUG9: data_list length =", len(data_list), "label_list length =", len(label_list))
 
-    class PrunedDataset(Dataset):
-        def __init__(self, data_list, label_list, transform=None):
-            self.data_list  = data_list
-            self.label_list = label_list
-            self.transform  = transform
-
-        def __len__(self):
-            return len(self.data_list)
-
-        def __getitem__(self, idx):
-            x = self.data_list[idx]
-            y = self.label_list[idx]
-            if self.transform is not None:
-                x = self.transform(x)
-            return x, y
-
-    if args.dataset in ["mnist", "fmnist"]:
-        transform = transforms.Normalize((0.1307,), (0.3081,))
-    else:  # CIFAR の場合
-        transform = transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5))
-    print("DEBUG10: Creating PrunedDataset + DataLoader")
+    if args.dataset == 'cifar':
+    # 注意：.ptファイルに保存されているデータがすでに正規化済みのため、
+    # ここではNormalizeは含めません。
+        transform = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+        ])
+    else:
+    # 他のデータセットの場合は適切なAugmentationを設定
+        transform = None
+    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+    # print("DEBUG10: Creating PrunedDataset + DataLoader")
     train_dataset = PrunedDataset(data_list, label_list, transform=transform)
     train_loader  = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    print("DEBUG11: train_loader created, len(train_loader) =", len(train_loader))
+    # print("DEBUG11: train_loader created, len(train_loader) =", len(train_loader))
 
     # ――― LocalUpdate オブジェクトを生成 ―――
     cid = args.client_id
@@ -188,8 +165,14 @@ if __name__ == '__main__':
     model.to(device)
     model.train()
 
-    # オプティマイザ設定
-    lr = args.lr * (0.5 ** (args.epoch // 10))
+    # # オプティマイザ設定
+    lr = args.lr  # 毎ラウンド、まず初期値にリセットされる
+    # lr = args.lr * (0.5 ** (args.epoch // 10))
+    # 例えば50エポック実行する場合、25ラウンド目と40ラウンド目で学習率を1/10にする
+    if args.epoch >= 40:
+        lr *= 0.01
+    elif args.epoch >= 25:
+        lr *= 0.1
     if args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=1e-4)
     else:
@@ -201,11 +184,11 @@ if __name__ == '__main__':
     total_mem = 0.0
     count_samples = 0
     epoch_loss = []
-    print("DEBUG12: About to enter local training loop")
+    # print("DEBUG12: About to enter local training loop")
     # ――― 各ローカルエポックごとに学習 ―――
     for _ in range(args.local_ep):
         batch_loss = []
-        print("len(train_loader):", len(train_loader))
+        print("len(train_loader.dataset):", len(train_loader.dataset))
         for batch_idx, (images, labels) in enumerate(train_loader):
             images, labels = images.to(device), labels.to(device)
 
@@ -214,7 +197,7 @@ if __name__ == '__main__':
             mem_before = psutil.Process().memory_info().rss / (1024 ** 2)  # MB
 
             # 通常の SGD ステップ
-            optimizer.zero_grad()
+            model.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
             loss.backward()
@@ -238,7 +221,7 @@ if __name__ == '__main__':
     avg_mem  = float(total_mem / max(count_samples, 1))
 
     # ――― 学習後のローカルモデルを保存 ―――
-    out_model_path = f"client_{cid}_round{args.epoch}_model.pth"
+    out_model_path = args.output_model_path
     try:
         torch.save(model.state_dict(), out_model_path)
     except Exception as e:
@@ -251,7 +234,7 @@ if __name__ == '__main__':
         "avg_cpu": avg_cpu,
         "avg_mem": avg_mem
     }
-    out_metrics_path = f"metrics_{cid}_round{args.epoch}.json"
+    out_metrics_path = args.output_metrics_path
     try:
         with open(out_metrics_path, "w") as f:
             json.dump(metrics, f, indent=4)
