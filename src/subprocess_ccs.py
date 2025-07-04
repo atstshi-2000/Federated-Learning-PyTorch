@@ -29,8 +29,6 @@ from collections import defaultdict
 import slackweb
 import subprocess
 
-# Slack Webhook URL
-SLACKURL = 'https://hooks.slack.com/services/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'
 
 # slack送信メソッド
 # slack送信メソッド
