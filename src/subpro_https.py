@@ -131,7 +131,6 @@ def shutdown():
 # ===================================================================
 # === 元のプログラムのヘルパー関数 (変更なし) ===
 # ===================================================================
-SLACKURL = 'https://hooks.slack.com/services/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'
 def slackPost(message):
     try:
         slack = slackweb.Slack(url=SLACKURL)
@@ -402,7 +401,7 @@ def training_loop(args):
     except requests.exceptions.ConnectionError:
         print("Server already down.")
     server_thread.join(timeout=5)
-    
+
     # ▲▲▲【修正】ここまで▲▲▲
 if __name__ == '__main__':
     args = args_parser()
